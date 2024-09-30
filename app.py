@@ -76,7 +76,8 @@ cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "50 per hour"]
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0')
 )
 
 # Remove the hardcoded SERVICE_ACCOUNT_FILE
@@ -571,7 +572,9 @@ def get_mock_data():
         ]
     }
 
-celery_app = Celery('tasks', broker=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
+celery_app = Celery('tasks', 
+                    broker=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'),
+                    backend=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
 
 @celery_app.task(bind=True)
 def process_youtube_videos(self, topic, date_filter, sort_filter, overperformance_threshold):
