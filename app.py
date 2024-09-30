@@ -72,6 +72,8 @@ app = Flask(__name__)
 # Configure Celery
 app.config['CELERY_BROKER_URL'] = os.environ.get('REDIS_URL')
 app.config['CELERY_RESULT_BACKEND'] = os.environ.get('REDIS_URL')
+app.config['CELERYD_MAX_TASKS_PER_CHILD'] = 1  # Restart worker after each task
+app.config['CELERYD_MEMORY_LIMIT'] = 300000  # 300MB limit, adjust as needed
 
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
 celery.conf.update(app.config)
