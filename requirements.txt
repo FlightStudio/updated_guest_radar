@@ -1,3 +1,4 @@
+setuptools
 flask
 requests
 beautifulsoup4
