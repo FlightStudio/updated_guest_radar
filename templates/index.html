@@ -186,43 +186,6 @@
             });
         }
     </script>
-    <script>
-        document.addEventListener('DOMContentLoaded', function() {
-            const form = document.querySelector('form');
-            const resultsContainer = document.getElementById('results');
-            
-            form.addEventListener('submit', function(e) {
-                e.preventDefault();
-                const formData = new FormData(form);
-                
-                resultsContainer.innerHTML = '<p>Processing request...</p>';
-                
-                const eventSource = new EventSource(`/?${new URLSearchParams(formData).toString()}`);
-                
-                eventSource.onmessage = function(event) {
-                    if (event.data === 'Done') {
-                        eventSource.close();
-                    } else if (event.data.startsWith('{')) {
-                        const data = JSON.parse(event.data);
-                        // Update the page with the received data
-                        updateResults(data);
-                    } else {
-                        resultsContainer.innerHTML = `<p>${event.data}</p>`;
-                    }
-                };
-                
-                eventSource.onerror = function() {
-                    eventSource.close();
-                    resultsContainer.innerHTML += '<p>Error occurred while fetching results.</p>';
-                };
-            });
-        });
-
-        function updateResults(data) {
-            // Implement this function to update the page with the received data
-            // You can use the data to populate the videos, total views, popularity score, and top guests
-        }
-    </script>
 </body>
 </html>
 
