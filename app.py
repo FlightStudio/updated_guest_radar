@@ -69,6 +69,13 @@ for var in required_env_vars:
 
 app = Flask(__name__)
 
+app = Flask(__name__)
+app.config['CELERY_BROKER_URL'] = os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0')
+app.config['CELERY_RESULT_BACKEND'] = os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0')
+
+celery_app = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery_app.conf.update(app.config)
+
 # Configure caching
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 
@@ -578,14 +585,28 @@ celery_app = Celery('tasks',
 
 @celery_app.task(bind=True)
 def process_youtube_videos(self, topic, date_filter, sort_filter, overperformance_threshold):
-    # Move the existing get_youtube_videos logic here
-    videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
-    return {
-        'videos': videos,
-        'total_views': total_views,
-        'popularity_score': popularity_score,
-        'top_guests': top_guests
-    }
+    try:
+        self.update_state(state='PROGRESS', meta={'status': 'Starting task'})
+        logging.info(f"Starting task for topic: {topic}, date_filter: {date_filter}, sort_filter: {sort_filter}, overperformance_threshold: {overperformance_threshold}")
+        
+        videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
+        
+        self.update_state(state='PROGRESS', meta={'status': 'Task completed'})
+        logging.info(f"Task completed. Found {len(videos)} videos, total views: {total_views}, popularity score: {popularity_score}")
+        
+        return {
+            'status': 'SUCCESS',
+            'result': {
+                'videos': videos,
+                'total_views': total_views,
+                'popularity_score': popularity_score,
+                'top_guests': top_guests
+            }
+        }
+    except Exception as e:
+        logging.error(f"Task failed with error: {str(e)}")
+        self.update_state(state='FAILURE', meta={'status': 'Task failed', 'error': str(e)})
+        raise
 
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
@@ -609,17 +630,21 @@ def task_status(task_id):
             'state': task.state,
             'status': 'Task is pending...'
         }
-    elif task.state != 'FAILURE':
+    elif task.state == 'PROGRESS':
         response = {
             'state': task.state,
             'status': task.info.get('status', '')
         }
-        if 'result' in task.info:
-            response['result'] = task.info['result']
+    elif task.state == 'SUCCESS':
+        response = {
+            'state': task.state,
+            'status': 'Task completed successfully',
+            'result': task.result
+        }
     else:
         response = {
             'state': task.state,
-            'status': str(task.info)
+            'status': str(task.info),  # this is the exception raised
         }
     return jsonify(response)
 
