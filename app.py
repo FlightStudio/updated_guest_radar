@@ -411,7 +411,7 @@ def get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshol
         for video in chunk:
             # Process video and append to channel_data and video_data
             # ... existing processing code ...
-        update_database_with_bulk_data(channel_data, video_data)
+            update_database_with_bulk_data(channel_data, video_data)
     
     chunk_size = 10
     for chunk in grouper(videos, chunk_size):
