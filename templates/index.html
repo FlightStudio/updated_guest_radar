@@ -162,44 +162,66 @@
             {% endif %}
         </div>
     </main>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
-        $(document).ready(function() {
-            $('#search-form').on('submit', function(e) {
-                e.preventDefault();
-                $.ajax({
-                    url: '/',
-                    method: 'POST',
-                    data: $(this).serialize(),
-                    success: function(data) {
-                        checkTaskStatus(data.task_id);
-                    }
-                });
+        function updateGuestSuitability(guestName, suitability, index) {
+            console.log(`Updating guest: ${guestName}, suitability: ${suitability}, index: ${index}`);
+            fetch('{{ url_for("update_guest_suitability") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `guest_name=${encodeURIComponent(guestName)}&suitability=${suitability}`
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.text();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                document.getElementById(`button-container-${index}`).innerHTML = '<span class="update-success">Data updated</span>';
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('An error occurred while updating the data.');
             });
-
-            function checkTaskStatus(taskId) {
-                $.ajax({
-                    url: '/task_status/' + taskId,
-                    method: 'GET',
-                    success: function(data) {
-                        if (data.state === 'PENDING') {
-                            setTimeout(function() {
-                                checkTaskStatus(taskId);
-                            }, 2000);
-                        } else if (data.state === 'SUCCESS') {
-                            updateResults(data.result);
-                        } else {
-                            alert('Task failed: ' + data.status);
-                        }
+        }
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.querySelector('form');
+            const resultsContainer = document.getElementById('results');
+            
+            form.addEventListener('submit', function(e) {
+                e.preventDefault();
+                const formData = new FormData(form);
+                
+                resultsContainer.innerHTML = '<p>Processing request...</p>';
+                
+                const eventSource = new EventSource(`/?${new URLSearchParams(formData).toString()}`);
+                
+                eventSource.onmessage = function(event) {
+                    if (event.data === 'Done') {
+                        eventSource.close();
+                    } else if (event.data.startsWith('{')) {
+                        const data = JSON.parse(event.data);
+                        // Update the page with the received data
+                        updateResults(data);
+                    } else {
+                        resultsContainer.innerHTML = `<p>${event.data}</p>`;
                     }
-                });
-            }
-
-            function updateResults(result) {
-                // Update the page with the results
-                // This function will depend on how you want to display the results
-            }
+                };
+                
+                eventSource.onerror = function() {
+                    eventSource.close();
+                    resultsContainer.innerHTML += '<p>Error occurred while fetching results.</p>';
+                };
+            });
         });
+
+        function updateResults(data) {
+            // Implement this function to update the page with the received data
+            // You can use the data to populate the videos, total views, popularity score, and top guests
+        }
     </script>
 </body>
 </html>
