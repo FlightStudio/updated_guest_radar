@@ -29,7 +29,10 @@ DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
 DB_NAME = os.getenv('DB_NAME')
 CLOUD_SQL_CONNECTION_NAME = os.getenv('CLOUD_SQL_CONNECTION_NAME')
-GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+if os.environ.get('GOOGLE_CREDENTIALS'):
+    with open('/app/google-credentials.json', 'w') as f:
+        json.dump(json.loads(os.environ.get('GOOGLE_CREDENTIALS')), f)
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/app/google-credentials.json'
 
 # Print values for debugging (remove in production)
 print(f"YOUTUBE_API_KEY: {YOUTUBE_API_KEY}")
