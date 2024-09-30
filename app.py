@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request, redirect, url_for, jsonify
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from openai import OpenAI
@@ -14,14 +14,15 @@ import csv
 import logging
 from google.cloud.sql.connector import Connector
 import sqlalchemy
-from sqlalchemy import text, insert, Table, Column, Integer, String, MetaData, Float, DateTime, func
+from sqlalchemy import text, insert
 import datetime
 from dateutil import parser
 import json
 import logging
+from celery import Celery
 
-# logging.basicConfig(level=logging.DEBUG)
-# logging.debug("Starting application")
+logging.basicConfig(level=logging.DEBUG)
+logging.debug("Starting application")
 
 # Load environment variables from .env file if it exists (for local development)
 load_dotenv()
@@ -67,6 +68,13 @@ for var in required_env_vars:
         logging.error(f"Missing required environment variable: {var}")
 
 app = Flask(__name__)
+
+# Configure Celery
+app.config['CELERY_BROKER_URL'] = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+app.config['CELERY_RESULT_BACKEND'] = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+
+celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
+celery.conf.update(app.config)
 
 # Configure caching
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
@@ -116,30 +124,6 @@ def getconn():
 pool = sqlalchemy.create_engine(
     "postgresql+pg8000://",
     creator=getconn,
-)
-
-# Define your tables
-metadata = MetaData()
-channels = Table('channels', metadata,
-    Column('channel_id', String, primary_key=True),
-    Column('title', String),
-    Column('subscriber_count', Integer),
-    Column('view_count', Integer),
-    Column('video_count', Integer),
-    # Add other columns as needed
-)
-
-videos = Table('videos', metadata,
-    Column('video_id', String, primary_key=True),
-    Column('title', String),
-    Column('views', Integer),
-    Column('average_views', Float),
-    Column('overperformance_percentage', Float),
-    Column('guest_info', String),
-    Column('subscriber_count', Integer),
-    Column('published_at', DateTime),
-    Column('topic', String),
-    # Add other columns as needed
 )
 
 # Function to create tables if they don't exist
@@ -594,30 +578,52 @@ def get_mock_data():
         ]
     }
 
+@celery.task
+def process_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold):
+    videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
+    return {
+        'videos': videos,
+        'total_views': total_views,
+        'popularity_score': popularity_score,
+        'top_guests': top_guests
+    }
+
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
 def index():
-    if app.config.get('DEBUG', False):
-        logging.info("Running in DEBUG mode, using mock data")
-        mock_data = get_mock_data()
-        return render_template('index.html', videos=mock_data['videos'], total_views=mock_data['total_views'], 
-                               popularity_score=mock_data['popularity_score'], top_guests=mock_data['top_guests'])
-    else:
-        logging.info("Running in production mode")
-        videos = []
-        total_views = 0
-        popularity_score = 0
-        top_guests = []
+    if request.method == 'POST':
         topic = request.form.get('topic', '')
         date_filter = request.form.get('date_filter', 'any')
         sort_filter = request.form.get('sort_filter', 'views')
         overperformance_threshold = int(request.form.get('overperformance_threshold', 120))
-        if request.method == 'POST' and topic:
-            logging.info(f"Processing POST request with topic: {topic}")
-            videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
-        else:
-            logging.info("GET request or no topic provided")
-        return render_template('index.html', videos=videos, total_views=total_views, popularity_score=popularity_score, top_guests=top_guests)
+        
+        if topic:
+            task = process_youtube_videos.delay(topic, date_filter, sort_filter, overperformance_threshold)
+            return jsonify({'task_id': task.id}), 202
+    
+    return render_template('index.html')
+
+@app.route('/task_status/<task_id>')
+def task_status(task_id):
+    task = process_youtube_videos.AsyncResult(task_id)
+    if task.state == 'PENDING':
+        response = {
+            'state': task.state,
+            'status': 'Task is pending...'
+        }
+    elif task.state != 'FAILURE':
+        response = {
+            'state': task.state,
+            'status': task.info.get('status', '')
+        }
+        if 'result' in task.info:
+            response['result'] = task.info['result']
+    else:
+        response = {
+            'state': task.state,
+            'status': str(task.info)
+        }
+    return jsonify(response)
 
 @app.route('/update_guest_suitability', methods=['POST'])
 @limiter.limit("5 per minute")
@@ -655,36 +661,35 @@ def update_database_with_bulk_data(channel_data, video_data):
             with conn.begin():
                 # Bulk insert/update channels
                 conn.execute(
-                    insert(channels).values(channel_data).on_conflict_do_update(
+                    insert(text('channels')).values(channel_data).on_conflict_do_update(
                         index_elements=['channel_id'],
                         set_={
-                            'title': channels.c.title,
-                            'subscriber_count': channels.c.subscriber_count,
-                            'view_count': channels.c.view_count,
-                            'video_count': channels.c.video_count,
-                            'last_updated': func.current_timestamp()
+                            'title': text('EXCLUDED.title'),
+                            'subscriber_count': text('EXCLUDED.subscriber_count'),
+                            'view_count': text('EXCLUDED.view_count'),
+                            'video_count': text('EXCLUDED.video_count'),
+                            'last_updated': text('CURRENT_TIMESTAMP')
                         }
                     )
                 )
 
                 # Bulk insert/update videos
                 conn.execute(
-                    insert(videos).values(video_data).on_conflict_do_update(
+                    insert(text('videos')).values(video_data).on_conflict_do_update(
                         index_elements=['video_id'],
                         set_={
-                            'views': videos.c.views,
-                            'average_views': videos.c.average_views,
-                            'overperformance_percentage': videos.c.overperformance_percentage,
-                            'guest_info': videos.c.guest_info,
-                            'subscriber_count': videos.c.subscriber_count,
-                            'published_at': videos.c.published_at,
-                            'topic': videos.c.topic
+                            'views': text('EXCLUDED.views'),
+                            'average_views': text('EXCLUDED.average_views'),
+                            'overperformance_percentage': text('EXCLUDED.overperformance_percentage'),
+                            'guest_info': text('EXCLUDED.guest_info'),
+                            'subscriber_count': text('EXCLUDED.subscriber_count'),
+                            'published_at': text('EXCLUDED.published_at'),
+                            'topic': text('EXCLUDED.topic')
                         }
                     )
                 )
         except Exception as e:
             logging.error(f"Error updating database in bulk: {str(e)}")
-            raise  # Re-raise the exception after logging
 
 if __name__ == '__main__':
     logging.info("Starting the application")
