@@ -10,3 +10,4 @@ pg8000
 python-dotenv
 Flask-Caching
 Flask-Limiter
+gunicorn
