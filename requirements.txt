@@ -5,6 +5,7 @@ Flask-Limiter==3.8.0
 google-api-python-client==2.141.0
 openai==1.41.0
 cloud-sql-python-connector[pg8000]==1.7.0
+google-cloud-sql-connector
 sqlalchemy==2.0.27
 pg8000==1.31.2
 python-dotenv==1.0.1
