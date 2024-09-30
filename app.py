@@ -19,8 +19,7 @@ import datetime
 from dateutil import parser
 import json
 import logging
-from celery_config import celery_app
-import uuid
+from celery import Celery
 
 logging.basicConfig(level=logging.DEBUG)
 logging.debug("Starting application")
@@ -571,6 +570,8 @@ def get_mock_data():
             (video['guest_info'], 1) for video in filtered_videos[:5]
         ]
     }
+
+celery_app = Celery('tasks', broker=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
 
 @celery_app.task(bind=True)
 def process_youtube_videos(self, topic, date_filter, sort_filter, overperformance_threshold):
