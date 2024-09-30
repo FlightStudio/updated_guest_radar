@@ -14,12 +14,13 @@ import csv
 import logging
 from google.cloud.sql.connector import Connector
 import sqlalchemy
-from sqlalchemy import text, insert
+from sqlalchemy import text, insert, Table, Column, Integer, String, MetaData, Float, DateTime, func
 import datetime
 from dateutil import parser
 import json
 import logging
-from celery import Celery
+from celery_config import celery_app
+import uuid
 
 logging.basicConfig(level=logging.DEBUG)
 logging.debug("Starting application")
@@ -37,9 +38,9 @@ CLOUD_SQL_CONNECTION_NAME = os.getenv('CLOUD_SQL_CONNECTION_NAME')
 logging.debug(f"GOOGLE_CREDENTIALS environment variable exists: {bool(os.environ.get('GOOGLE_CREDENTIALS'))}")
 
 if os.environ.get('GOOGLE_CREDENTIALS'):
-    with open('/app/google-credentials.json', 'w') as f:
+    with open('google-credentials.json', 'w') as f:
         json.dump(json.loads(os.environ.get('GOOGLE_CREDENTIALS')), f)
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/app/google-credentials.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'google-credentials.json'
     logging.debug("Google credentials file created")
 else:
     logging.error("GOOGLE_CREDENTIALS environment variable not found")
@@ -68,13 +69,6 @@ for var in required_env_vars:
         logging.error(f"Missing required environment variable: {var}")
 
 app = Flask(__name__)
-
-# Configure Celery
-app.config['CELERY_BROKER_URL'] = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-app.config['CELERY_RESULT_BACKEND'] = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-
-celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery.conf.update(app.config)
 
 # Configure caching
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
@@ -578,8 +572,9 @@ def get_mock_data():
         ]
     }
 
-@celery.task
-def process_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold):
+@celery_app.task(bind=True)
+def process_youtube_videos(self, topic, date_filter, sort_filter, overperformance_threshold):
+    # Move the existing get_youtube_videos logic here
     videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
     return {
         'videos': videos,
@@ -597,9 +592,8 @@ def index():
         sort_filter = request.form.get('sort_filter', 'views')
         overperformance_threshold = int(request.form.get('overperformance_threshold', 120))
         
-        if topic:
-            task = process_youtube_videos.delay(topic, date_filter, sort_filter, overperformance_threshold)
-            return jsonify({'task_id': task.id}), 202
+        task = process_youtube_videos.delay(topic, date_filter, sort_filter, overperformance_threshold)
+        return jsonify({'task_id': task.id}), 202
     
     return render_template('index.html')
 
@@ -688,13 +682,10 @@ def update_database_with_bulk_data(channel_data, video_data):
                         }
                     )
                 )
+                conn.commit()  # Explicitly commit the transaction
         except Exception as e:
             logging.error(f"Error updating database in bulk: {str(e)}")
-
-if __name__ == '__main__':
-    logging.info("Starting the application")
-    create_tables()
-    app.run(debug=False)
+            conn.rollback()  # Explicitly rollback on error
 
 if __name__ == '__main__':
     logging.info("Starting the application")
