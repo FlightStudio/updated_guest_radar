@@ -43,6 +43,9 @@ if os.environ.get('GOOGLE_CREDENTIALS'):
 else:
     logging.error("GOOGLE_CREDENTIALS environment variable not found")
 
+google_creds = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+logging.debug(f"GOOGLE_APPLICATION_CREDENTIALS: {google_creds}")
+
 logging.debug(f"YOUTUBE_API_KEY exists: {bool(os.environ.get('YOUTUBE_API_KEY'))}")
 logging.debug(f"OPENAI_API_KEY exists: {bool(os.environ.get('OPENAI_API_KEY'))}")
 logging.debug(f"DB_USER exists: {bool(os.environ.get('DB_USER'))}")
@@ -57,7 +60,6 @@ print(f"DB_USER: {DB_USER}")
 print(f"DB_PASS: {DB_PASS}")
 print(f"DB_NAME: {DB_NAME}")
 print(f"CLOUD_SQL_CONNECTION_NAME: {CLOUD_SQL_CONNECTION_NAME}")
-print(f"GOOGLE_APPLICATION_CREDENTIALS: {GOOGLE_APPLICATION_CREDENTIALS}")
 
 app = Flask(__name__)
 
