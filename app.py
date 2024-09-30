@@ -19,23 +19,26 @@ import datetime
 from dateutil import parser
 import json
 
-# Get the directory of the current script
-current_dir = os.path.dirname(os.path.abspath(__file__))
+# Load environment variables from .env file if it exists (for local development)
+load_dotenv()
 
-# Construct the full path to config.env
-config_path = os.path.join(current_dir, 'config.env')
+# Now use environment variables directly
+YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
+OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+DB_USER = os.getenv('DB_USER')
+DB_PASS = os.getenv('DB_PASS')
+DB_NAME = os.getenv('DB_NAME')
+CLOUD_SQL_CONNECTION_NAME = os.getenv('CLOUD_SQL_CONNECTION_NAME')
+GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 
-# Load environment variables from config.env, overwriting existing ones
-load_dotenv(config_path, override=True)
-
-# Now print out the values to verify they're loaded correctly
-print(f"YOUTUBE_API_KEY: {os.getenv('YOUTUBE_API_KEY')}")
-print(f"OPENAI_API_KEY: {os.getenv('OPENAI_API_KEY')}")
-print(f"DB_USER: {os.getenv('DB_USER')}")
-print(f"DB_PASS: {os.getenv('DB_PASS')}")
-print(f"DB_NAME: {os.getenv('DB_NAME')}")
-print(f"CLOUD_SQL_CONNECTION_NAME: {os.getenv('CLOUD_SQL_CONNECTION_NAME')}")
-print(f"GOOGLE_APPLICATION_CREDENTIALS: {os.getenv('GOOGLE_APPLICATION_CREDENTIALS')}")
+# Print values for debugging (remove in production)
+print(f"YOUTUBE_API_KEY: {YOUTUBE_API_KEY}")
+print(f"OPENAI_API_KEY: {OPENAI_API_KEY}")
+print(f"DB_USER: {DB_USER}")
+print(f"DB_PASS: {DB_PASS}")
+print(f"DB_NAME: {DB_NAME}")
+print(f"CLOUD_SQL_CONNECTION_NAME: {CLOUD_SQL_CONNECTION_NAME}")
+print(f"GOOGLE_APPLICATION_CREDENTIALS: {GOOGLE_APPLICATION_CREDENTIALS}")
 
 app = Flask(__name__)
 
@@ -49,12 +52,9 @@ limiter = Limiter(
     default_limits=["200 per day", "50 per hour"]
 )
 
-# Your YouTube Data API key and OpenAI API key
-YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY')
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-
-# Path to your service account JSON key file
-SERVICE_ACCOUNT_FILE = 'flightstudio-d8c6c3039d4c.json'  # Update to your JSON key file path
+# Remove the hardcoded SERVICE_ACCOUNT_FILE
+# Instead, use the GOOGLE_APPLICATION_CREDENTIALS environment variable
+# when you need to authenticate with Google services
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
