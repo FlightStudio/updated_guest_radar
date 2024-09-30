@@ -18,6 +18,10 @@ from sqlalchemy import text, insert
 import datetime
 from dateutil import parser
 import json
+import logging
+
+logging.basicConfig(level=logging.DEBUG)
+logging.debug("Starting application")
 
 # Load environment variables from .env file if it exists (for local development)
 load_dotenv()
@@ -29,10 +33,22 @@ DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
 DB_NAME = os.getenv('DB_NAME')
 CLOUD_SQL_CONNECTION_NAME = os.getenv('CLOUD_SQL_CONNECTION_NAME')
+logging.debug(f"GOOGLE_CREDENTIALS environment variable exists: {bool(os.environ.get('GOOGLE_CREDENTIALS'))}")
+
 if os.environ.get('GOOGLE_CREDENTIALS'):
     with open('/app/google-credentials.json', 'w') as f:
         json.dump(json.loads(os.environ.get('GOOGLE_CREDENTIALS')), f)
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = '/app/google-credentials.json'
+    logging.debug("Google credentials file created")
+else:
+    logging.error("GOOGLE_CREDENTIALS environment variable not found")
+
+logging.debug(f"YOUTUBE_API_KEY exists: {bool(os.environ.get('YOUTUBE_API_KEY'))}")
+logging.debug(f"OPENAI_API_KEY exists: {bool(os.environ.get('OPENAI_API_KEY'))}")
+logging.debug(f"DB_USER exists: {bool(os.environ.get('DB_USER'))}")
+logging.debug(f"DB_PASS exists: {bool(os.environ.get('DB_PASS'))}")
+logging.debug(f"DB_NAME exists: {bool(os.environ.get('DB_NAME'))}")
+logging.debug(f"CLOUD_SQL_CONNECTION_NAME exists: {bool(os.environ.get('CLOUD_SQL_CONNECTION_NAME'))}")
 
 # Print values for debugging (remove in production)
 print(f"YOUTUBE_API_KEY: {YOUTUBE_API_KEY}")
