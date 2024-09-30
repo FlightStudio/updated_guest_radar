@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guest Radar</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.1.1/css/all.min.css">
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='styles.css') }}">
+    <script>
+        function formatNumber(num) {
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            }
+            if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+
+        document.addEventListener("DOMContentLoaded", function() {
+            var viewsElements = document.querySelectorAll(".views");
+            viewsElements.forEach(function(el) {
+                var num = parseInt(el.textContent);
+                el.textContent = formatNumber(num);
+            });
+
+            var avgViewsElements = document.querySelectorAll(".avg-views");
+            avgViewsElements.forEach(function(el) {
+                var num = parseInt(el.textContent);
+                el.textContent = formatNumber(num);
+            });
+
+            var overperformanceElements = document.querySelectorAll(".overperformance");
+            overperformanceElements.forEach(function(el) {
+                var num = parseFloat(el.textContent).toFixed(2);
+                el.textContent = num + '%';
+            });
+
+            var subscriberElements = document.querySelectorAll(".subscribers");
+            subscriberElements.forEach(function(el) {
+                var num = parseInt(el.textContent);
+                el.textContent = formatNumber(num);
+            });
+
+            var totalViewsElement = document.getElementById("total-views");
+            if (totalViewsElement) {
+                var num = parseInt(totalViewsElement.textContent);
+                totalViewsElement.textContent = formatNumber(num);
+            }
+
+            var popularityScoreElement = document.getElementById("popularity-score");
+            if (popularityScoreElement) {
+                var num = parseFloat(popularityScoreElement.textContent).toFixed(2);
+                popularityScoreElement.textContent = num + '%';
+            }
+        });
+    </script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1><i class="fas fa-satellite-dish"></i> Guest Radar</h1>
+        </div>
+    </header>
+    <main class="center-wrapper">
+        <div class="search-container">
+            <form method="POST" id="search-form">
+                <div class="search-bar">
+                    <input type="text" id="topic" name="topic" placeholder="Enter a topic" class="topic-input" value="{{ request.form.get('topic', '') }}">
+                    <button type="submit">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+            </form>
+        </div>
+        <div class="filters">
+            <div class="filter-item">
+                <label for="date-filter">Upload Date:</label>
+                <select id="date-filter" name="date_filter" form="search-form">
+                    <option value="any" {% if request.form.get('date_filter', 'any') == 'any' %}selected{% endif %}>Any time</option>
+                    <option value="week" {% if request.form.get('date_filter') == 'week' %}selected{% endif %}>Last week</option>
+                    <option value="month" {% if request.form.get('date_filter') == 'month' %}selected{% endif %}>Last month</option>
+                    <option value="year" {% if request.form.get('date_filter') == 'year' %}selected{% endif %}>Last year</option>
+                </select>
+            </div>
+            <div class="filter-item">
+                <label for="sort-filter">Sort By:</label>
+                <select id="sort-filter" name="sort_filter" form="search-form">
+                    <option value="views" {% if request.form.get('sort_filter') == 'views' %}selected{% endif %}>Most Viewed</option>
+                    <option value="overperformance" {% if request.form.get('sort_filter') == 'overperformance' %}selected{% endif %}>Most Overperformed</option>
+                    <option value="newest" {% if request.form.get('sort_filter') == 'newest' %}selected{% endif %}>Newest</option>
+                </select>
+            </div>
+            <div class="filter-item">
+                <label for="overperformance-threshold">Overperformance (%):</label>
+                <input type="number" id="overperformance-threshold" name="overperformance_threshold" form="search-form" 
+                       value="{{ request.form.get('overperformance_threshold', 120) }}" min="100" max="1000" step="10">
+            </div>
+        </div>
+
+        {% if top_guests %}
+        <div class="leaderboard">
+            <h2><i class="fas fa-trophy"></i> Top 5 Guests</h2>
+            <ul>
+                {% for guest, count in top_guests %}
+                    <li>
+                        <div class="guest-info">
+                            <a href="https://www.google.com/search?q={{ guest | urlencode }}" target="_blank">
+                                <strong>{{ guest }}</strong>
+                            </a>
+                            <span class="appearance-count">{{ count }} appearances</span>
+                        </div>
+                        <div class="button-container" id="button-container-{{ loop.index }}">
+                            <button onclick="updateGuestSuitability('{{ guest }}', 'suited', {{ loop.index }})" class="btn-suited">
+                                <i class="fas fa-thumbs-up"></i> Suited
+                            </button>
+                            <button onclick="updateGuestSuitability('{{ guest }}', 'not_suited', {{ loop.index }})" class="btn-not-suited">
+                                <i class="fas fa-thumbs-down"></i> Not Suited
+                            </button>
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="results-container">
+            {% if videos %}
+                <h2><i class="fas fa-chart-line"></i> Video Results</h2>
+                <div class="stats-summary">
+                    <div class="stat-item">
+                        <i class="fas fa-eye"></i>
+                        <span>Total Views: <span id="total-views">{{ total_views }}</span></span>
+                    </div>
+                    <div class="stat-item">
+                        <i class="fas fa-fire"></i>
+                        <span>Popularity Score: <span id="popularity-score">{{ popularity_score }}</span></span>
+                    </div>
+                </div>
+                <ul class="video-list">
+                    {% for video in videos %}
+                        <li class="video-item">
+                            <div class="video-thumbnail">
+                                <a href="{{ video.url }}" target="_blank">
+                                    <img src="{{ video.thumbnail_url }}" alt="{{ video.title }} thumbnail">
+                                </a>
+                            </div>
+                            <div class="video-details">
+                                <a href="{{ video.url }}" target="_blank" class="video-title">{{ video.title }}</a>
+                                <p class="video-description">{{ video.description | truncate(100) }}</p>
+                                <div class="video-stats">
+                                    <span><i class="fas fa-eye"></i> <span class="views">{{ video.views }}</span></span>
+                                    <span><i class="fas fa-chart-line"></i> <span class="overperformance">{{ video.overperformance_percentage }}</span></span>
+                                    <span><i class="fas fa-users"></i> <span class="subscribers">{{ video.subscriber_count }}</span></span>
+                                    <span><i class="fas fa-user-tie"></i> {{ video.guest_info }}</span>
+                                </div>
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </div>
+    </main>
+    <script>
+        function updateGuestSuitability(guestName, suitability, index) {
+            console.log(`Updating guest: ${guestName}, suitability: ${suitability}, index: ${index}`);
+            fetch('{{ url_for("update_guest_suitability") }}', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `guest_name=${encodeURIComponent(guestName)}&suitability=${suitability}`
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.text();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                document.getElementById(`button-container-${index}`).innerHTML = '<span class="update-success">Data updated</span>';
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('An error occurred while updating the data.');
+            });
+        }
+    </script>
+</body>
+</html>
+
