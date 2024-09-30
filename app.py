@@ -61,6 +61,11 @@ print(f"DB_PASS: {DB_PASS}")
 print(f"DB_NAME: {DB_NAME}")
 print(f"CLOUD_SQL_CONNECTION_NAME: {CLOUD_SQL_CONNECTION_NAME}")
 
+required_env_vars = ['YOUTUBE_API_KEY', 'OPENAI_API_KEY', 'DB_USER', 'DB_PASS', 'DB_NAME', 'CLOUD_SQL_CONNECTION_NAME']
+for var in required_env_vars:
+    if not os.getenv(var):
+        logging.error(f"Missing required environment variable: {var}")
+
 app = Flask(__name__)
 
 # Configure caching
