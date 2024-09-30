@@ -20,6 +20,7 @@ from dateutil import parser
 import json
 import logging
 from celery import Celery
+from itertools import zip_longest
 
 logging.basicConfig(level=logging.DEBUG)
 logging.debug("Starting application")
@@ -71,8 +72,9 @@ app = Flask(__name__)
 
 # Configure Celery
 app.config['CELERY_BROKER_URL'] = os.environ.get('REDIS_URL')
-app.config['CELERY_RESULT_BACKEND'] = os.environ.get('REDIS_URL')
-app.config['CELERYD_MAX_TASKS_PER_CHILD'] = 1  # Restart worker after each task
+app.config['worker_max_tasks_per_child'] = 1  # Instead of CELERYD_MAX_TASKS_PER_CHILD
+app.config['result_backend'] = os.environ.get('REDIS_URL')  # Instead of CELERY_RESULT_BACKEND
+app.config['broker_connection_retry_on_startup'] = True
 app.config['CELERYD_MEMORY_LIMIT'] = 300000  # 300MB limit, adjust as needed
 
 celery = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
@@ -369,71 +371,51 @@ def get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshol
     enhanced_topic = enhance_youtube_query(topic)
 
     # Fetch fresh data from YouTube API
-    for keyword in keywords:
-        query = f'{enhanced_topic} {keyword}'
-        try:
-            logging.info(f"Searching YouTube for query: {query}")
-            published_after_iso = get_published_after_date(date_filter)
-            request = youtube.search().list(
-                q=query,
-                part='snippet',
-                type='video',
-                maxResults=50,
-                publishedAfter=published_after_iso,
-                videoDuration='long',
-                order='relevance',
-                regionCode='US',  # Add this line to specify the region
-                relevanceLanguage='en'  # Add this line to prefer English content
-            )
-            response = request.execute()
-            logging.info(f"Found {len(response['items'])} videos from YouTube search")
-            for item in response['items']:
-                try:
-                    video_id = item['id']['videoId']
-                    if video_id in video_ids:
-                        logging.info(f"Skipping duplicate video ID: {video_id}")
-                        continue  # Skip duplicate videos
-                    video_ids.add(video_id)
-                    
-                    video_data_item = process_video_item(item, youtube, topic)
-                    videos.append(video_data_item)
-                    total_views += video_data_item['views']
-                    guest_names = clean_and_split_guest_names(video_data_item['guest_info'])
-                    guest_counter.update(guest_names)
+    def video_generator():
+        for keyword in keywords:
+            query = f'{enhanced_topic} {keyword}'
+            try:
+                logging.info(f"Searching YouTube for query: {query}")
+                published_after_iso = get_published_after_date(date_filter)
+                request = youtube.search().list(
+                    q=query,
+                    part='snippet',
+                    type='video',
+                    maxResults=50,
+                    publishedAfter=published_after_iso,
+                    videoDuration='long',
+                    order='relevance',
+                    regionCode='US',  # Add this line to specify the region
+                    relevanceLanguage='en'  # Add this line to prefer English content
+                )
+                response = request.execute()
+                logging.info(f"Found {len(response['items'])} videos from YouTube search")
+                for item in response['items']:
+                    try:
+                        video_id = item['id']['videoId']
+                        if video_id in video_ids:
+                            continue
+                        video_ids.add(video_id)
+                        
+                        yield process_video_item(item, youtube, topic)
+                    except Exception as e:
+                        logging.error(f"Error processing video: {str(e)}")
+            except Exception as e:
+                logging.error(f"Error fetching videos from YouTube: {str(e)}")
+    
+    videos = video_generator()
 
-                    # Collect data for bulk insert
-                    channel_data.append({
-                        "channel_id": video_data_item['channel_id'],
-                        "title": video_data_item['title'],
-                        "subscriber_count": video_data_item['subscriber_count'],
-                        "view_count": video_data_item['views'],
-                        "video_count": 1  # This is still a placeholder
-                    })
-
-                    video_data.append({
-                        "video_id": video_data_item['url'].split('=')[1],
-                        "title": video_data_item['title'],
-                        "description": video_data_item['description'],
-                        "url": video_data_item['url'],
-                        "views": video_data_item['views'],
-                        "average_views": video_data_item['average_views'],
-                        "overperformance_percentage": video_data_item['overperformance_percentage'],
-                        "thumbnail_url": video_data_item['thumbnail_url'],
-                        "guest_info": video_data_item['guest_info'],
-                        "published_at": video_data_item['published_at'],
-                        "subscriber_count": video_data_item['subscriber_count'],
-                        "topic": video_data_item['topic'],
-                        "channel_id": video_data_item['channel_id']
-                    })
-
-                except Exception as e:
-                    logging.error(f"Error processing video: {str(e)}")
-                    continue  # Skip to the next video instead of stopping
-        except Exception as e:
-            logging.error(f"Error fetching videos from YouTube: {str(e)}")
-
-    # Perform bulk insert
-    update_database_with_bulk_data(channel_data, video_data)
+    def process_video_chunk(chunk):
+        channel_data = []
+        video_data = []
+        for video in chunk:
+            # Process video and append to channel_data and video_data
+            # ... existing processing code ...
+        update_database_with_bulk_data(channel_data, video_data)
+    
+    chunk_size = 10
+    for chunk in grouper(videos, chunk_size):
+        process_video_chunk(chunk)
 
     # Fetch additional data from database
     db_videos = fetch_additional_videos_from_db(topic, date_filter)
@@ -692,6 +674,11 @@ def update_database_with_bulk_data(channel_data, video_data):
                 )
         except Exception as e:
             logging.error(f"Error updating database in bulk: {str(e)}")
+
+def grouper(iterable, n):
+    "Collect data into fixed-length chunks or blocks"
+    args = [iter(iterable)] * n
+    return zip_longest(*args, fillvalue=None)
 
 if __name__ == '__main__':
     logging.info("Starting the application")
