@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+from flask import Flask, render_template, request, redirect, url_for
 from googleapiclient.discovery import build
 from google.oauth2 import service_account
 from openai import OpenAI
@@ -14,15 +14,16 @@ import csv
 import logging
 from google.cloud.sql.connector import Connector
 import sqlalchemy
-from sqlalchemy import text, insert, Table, Column, Integer, String, MetaData, Float, DateTime, func
+from sqlalchemy import text, insert, Table, MetaData, func
 import datetime
 from dateutil import parser
 import json
 import logging
-from celery import Celery
-
-logging.basicConfig(level=logging.DEBUG)
-logging.debug("Starting application")
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Column, String, Integer, DateTime
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy import create_engine, event
+from db_utils import before_cursor_execute, after_cursor_execute
 
 # Load environment variables from .env file if it exists (for local development)
 load_dotenv()
@@ -34,25 +35,13 @@ DB_USER = os.getenv('DB_USER')
 DB_PASS = os.getenv('DB_PASS')
 DB_NAME = os.getenv('DB_NAME')
 CLOUD_SQL_CONNECTION_NAME = os.getenv('CLOUD_SQL_CONNECTION_NAME')
-logging.debug(f"GOOGLE_CREDENTIALS environment variable exists: {bool(os.environ.get('GOOGLE_CREDENTIALS'))}")
-
+GOOGLE_APPLICATION_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
 if os.environ.get('GOOGLE_CREDENTIALS'):
     with open('google-credentials.json', 'w') as f:
         json.dump(json.loads(os.environ.get('GOOGLE_CREDENTIALS')), f)
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'google-credentials.json'
-    logging.debug("Google credentials file created")
-else:
-    logging.error("GOOGLE_CREDENTIALS environment variable not found")
 
-google_creds = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
-logging.debug(f"GOOGLE_APPLICATION_CREDENTIALS: {google_creds}")
-
-logging.debug(f"YOUTUBE_API_KEY exists: {bool(os.environ.get('YOUTUBE_API_KEY'))}")
-logging.debug(f"OPENAI_API_KEY exists: {bool(os.environ.get('OPENAI_API_KEY'))}")
-logging.debug(f"DB_USER exists: {bool(os.environ.get('DB_USER'))}")
-logging.debug(f"DB_PASS exists: {bool(os.environ.get('DB_PASS'))}")
-logging.debug(f"DB_NAME exists: {bool(os.environ.get('DB_NAME'))}")
-logging.debug(f"CLOUD_SQL_CONNECTION_NAME exists: {bool(os.environ.get('CLOUD_SQL_CONNECTION_NAME'))}")
+SERVICE_ACCOUNT_FILE='google-credentials.json'
 
 # Print values for debugging (remove in production)
 print(f"YOUTUBE_API_KEY: {YOUTUBE_API_KEY}")
@@ -61,20 +50,9 @@ print(f"DB_USER: {DB_USER}")
 print(f"DB_PASS: {DB_PASS}")
 print(f"DB_NAME: {DB_NAME}")
 print(f"CLOUD_SQL_CONNECTION_NAME: {CLOUD_SQL_CONNECTION_NAME}")
-
-required_env_vars = ['YOUTUBE_API_KEY', 'OPENAI_API_KEY', 'DB_USER', 'DB_PASS', 'DB_NAME', 'CLOUD_SQL_CONNECTION_NAME']
-for var in required_env_vars:
-    if not os.getenv(var):
-        logging.error(f"Missing required environment variable: {var}")
+print(f"GOOGLE_APPLICATION_CREDENTIALS: {GOOGLE_APPLICATION_CREDENTIALS}")
 
 app = Flask(__name__)
-
-app = Flask(__name__)
-app.config['CELERY_BROKER_URL'] = os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0')
-app.config['CELERY_RESULT_BACKEND'] = os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0')
-
-celery_app = Celery(app.name, broker=app.config['CELERY_BROKER_URL'])
-celery_app.conf.update(app.config)
 
 # Configure caching
 cache = Cache(app, config={'CACHE_TYPE': 'simple'})
@@ -83,24 +61,38 @@ cache = Cache(app, config={'CACHE_TYPE': 'simple'})
 limiter = Limiter(
     get_remote_address,
     app=app,
-    default_limits=["200 per day", "50 per hour"],
-    storage_uri=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0')
+    default_limits=["200 per day", "50 per hour"]
 )
 
 # Remove the hardcoded SERVICE_ACCOUNT_FILE
 # Instead, use the GOOGLE_APPLICATION_CREDENTIALS environment variable
 # when you need to authenticate with Google services
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-# Enable SQLAlchemy logging
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
+# Set up logging
+logging.basicConfig(level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s',
+                    datefmt='%Y-%m-%d %H:%M:%S')
+
+logger = logging.getLogger(__name__)
+
+
+
+# For database queries, you can set a higher log level
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+
+# If you're using Flask, you can also adjust its logger
+app.logger.setLevel(logging.INFO)
 
 # Database connection configuration
 db_user = os.getenv("DB_USER", "postgres")
 db_pass = os.getenv("DB_PASS")
 db_name = os.getenv("DB_NAME", "guestdiscovery")
 connection_name = os.getenv("CLOUD_SQL_CONNECTION_NAME")
+
+# Create engine and attach event listeners
+engine = create_engine('postgresql://user:password@localhost/dbname')
+event.listen(engine, 'before_cursor_execute', before_cursor_execute)
+event.listen(engine, 'after_cursor_execute', after_cursor_execute)
 
 print(f"DB_USER: {db_user}")
 print(f"DB_PASS: {db_pass}")
@@ -170,13 +162,13 @@ def create_tables():
 
 # Modify the get_youtube_service function to use the API key
 def get_youtube_service():
-    # credentials = service_account.Credentials.from_service_account_file(
-    #     SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/youtube.readonly']
-    # )
-    # youtube = build("youtube", "v3", credentials=credentials)
+    credentials = service_account.Credentials.from_service_account_file(
+        SERVICE_ACCOUNT_FILE, scopes=['https://www.googleapis.com/auth/youtube.readonly']
+    )
+    youtube = build("youtube", "v3", credentials=credentials)
     
     # Use the API key instead
-    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+    #youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
     return youtube
 
 # Cache the YouTube service to avoid re-initializing it frequently
@@ -235,19 +227,21 @@ def extract_guest_info_using_gpt(video_title, video_description):
         )
         guest_info_text = response.choices[0].message.content.strip()
         logging.info(f"Video Title: {video_title}")
-        logging.info(f"OpenAI API raw response: {guest_info_text}")
         
-        # Try to parse as JSON, if it fails, use the raw text
+        # Try to parse as JSON, if it fails, use regex to extract the name
         try:
             guest_info_json = json.loads(guest_info_text)
             guest_info = guest_info_json.get("guest_name", "Unknown")
         except json.JSONDecodeError:
-            # If it's not valid JSON, use the raw text if it's not empty
-            guest_info = guest_info_text if guest_info_text else "Unknown"
+            # If it's not valid JSON, use regex to extract the name
+            import re
+            match = re.search(r'"guest_name":\s*"([^"]+)"', guest_info_text)
+            guest_info = match.group(1) if match else "Unknown"
         
         # Validate and clean the extracted name
         guest_info = clean_guest_name(guest_info)
-               # Validate the extracted name
+        
+        # Validate the extracted name
         if not guest_info or guest_info.lower() == "unknown" or "unknown" in guest_info.lower():
             return "Unknown"
         
@@ -431,8 +425,11 @@ def get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshol
         except Exception as e:
             logging.error(f"Error fetching videos from YouTube: {str(e)}")
 
+    # Remove duplicates from channel_data
+    channel_data = list({channel['channel_id']: channel for channel in channel_data}.values())
+
     # Perform bulk insert
-    update_database_with_bulk_data(channel_data, video_data)
+    update_database_with_bulk_data(channel_data, video_data, topic)
 
     # Fetch additional data from database
     db_videos = fetch_additional_videos_from_db(topic, date_filter)
@@ -579,74 +576,30 @@ def get_mock_data():
         ]
     }
 
-celery_app = Celery('tasks', 
-                    broker=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'),
-                    backend=os.getenv('REDISCLOUD_URL', 'redis://localhost:6379/0'))
-
-@celery_app.task(bind=True)
-def process_youtube_videos(self, topic, date_filter, sort_filter, overperformance_threshold):
-    try:
-        self.update_state(state='PROGRESS', meta={'status': 'Starting task'})
-        logging.info(f"Starting task for topic: {topic}, date_filter: {date_filter}, sort_filter: {sort_filter}, overperformance_threshold: {overperformance_threshold}")
-        
-        videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
-        
-        self.update_state(state='PROGRESS', meta={'status': 'Task completed'})
-        logging.info(f"Task completed. Found {len(videos)} videos, total views: {total_views}, popularity score: {popularity_score}")
-        
-        return {
-            'status': 'SUCCESS',
-            'result': {
-                'videos': videos,
-                'total_views': total_views,
-                'popularity_score': popularity_score,
-                'top_guests': top_guests
-            }
-        }
-    except Exception as e:
-        logging.error(f"Task failed with error: {str(e)}")
-        self.update_state(state='FAILURE', meta={'status': 'Task failed', 'error': str(e)})
-        raise
-
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("10 per minute")
 def index():
-    if request.method == 'POST':
+    if app.config.get('DEBUG', False):
+        logging.info("Running in DEBUG mode, using mock data")
+        mock_data = get_mock_data()
+        return render_template('index.html', videos=mock_data['videos'], total_views=mock_data['total_views'], 
+                               popularity_score=mock_data['popularity_score'], top_guests=mock_data['top_guests'])
+    else:
+        logging.info("Running in production mode")
+        videos = []
+        total_views = 0
+        popularity_score = 0
+        top_guests = []
         topic = request.form.get('topic', '')
         date_filter = request.form.get('date_filter', 'any')
         sort_filter = request.form.get('sort_filter', 'views')
         overperformance_threshold = int(request.form.get('overperformance_threshold', 120))
-        
-        task = process_youtube_videos.delay(topic, date_filter, sort_filter, overperformance_threshold)
-        return jsonify({'task_id': task.id}), 202
-    
-    return render_template('index.html')
-
-@app.route('/task_status/<task_id>')
-def task_status(task_id):
-    task = process_youtube_videos.AsyncResult(task_id)
-    if task.state == 'PENDING':
-        response = {
-            'state': task.state,
-            'status': 'Task is pending...'
-        }
-    elif task.state == 'PROGRESS':
-        response = {
-            'state': task.state,
-            'status': task.info.get('status', '')
-        }
-    elif task.state == 'SUCCESS':
-        response = {
-            'state': task.state,
-            'status': 'Task completed successfully',
-            'result': task.result
-        }
-    else:
-        response = {
-            'state': task.state,
-            'status': str(task.info),  # this is the exception raised
-        }
-    return jsonify(response)
+        if request.method == 'POST' and topic:
+            logging.info(f"Processing POST request with topic: {topic}")
+            videos, total_views, popularity_score, top_guests = get_youtube_videos(topic, date_filter, sort_filter, overperformance_threshold)
+        else:
+            logging.info("GET request or no topic provided")
+        return render_template('index.html', videos=videos, total_views=total_views, popularity_score=popularity_score, top_guests=top_guests)
 
 @app.route('/update_guest_suitability', methods=['POST'])
 @limiter.limit("5 per minute")
@@ -678,43 +631,58 @@ def update_guest_suitability():
         logging.error(f"Error updating database: {str(e)}")
         return "Error", 500
 
-def update_database_with_bulk_data(channel_data, video_data):
+def update_database_with_bulk_data(channel_data, video_data, topic):
+    metadata = MetaData()
+    channels = Table('channels', metadata, autoload_with=pool)
+    videos = Table('videos', metadata, autoload_with=pool)
+
     with pool.connect() as conn:
         try:
             with conn.begin():
-                # Bulk insert/update channels
-                conn.execute(
-                    insert(text('channels')).values(channel_data).on_conflict_do_update(
-                        index_elements=['channel_id'],
-                        set_={
-                            'title': text('EXCLUDED.title'),
-                            'subscriber_count': text('EXCLUDED.subscriber_count'),
-                            'view_count': text('EXCLUDED.view_count'),
-                            'video_count': text('EXCLUDED.video_count'),
-                            'last_updated': text('CURRENT_TIMESTAMP')
-                        }
-                    )
+                logger.info("Starting database transaction")
+                
+                # Upsert channels
+                stmt = insert(channels).values(channel_data)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['channel_id'],
+                    set_={
+                        'title': stmt.excluded.title,
+                        'subscriber_count': stmt.excluded.subscriber_count,
+                        'view_count': stmt.excluded.view_count,
+                        'video_count': stmt.excluded.video_count,
+                        'topic': topic
+                    }
                 )
+                result = conn.execute(stmt)
+                logger.info(f"Upserted {result.rowcount} channels")
 
-                # Bulk insert/update videos
-                conn.execute(
-                    insert(text('videos')).values(video_data).on_conflict_do_update(
-                        index_elements=['video_id'],
-                        set_={
-                            'views': text('EXCLUDED.views'),
-                            'average_views': text('EXCLUDED.average_views'),
-                            'overperformance_percentage': text('EXCLUDED.overperformance_percentage'),
-                            'guest_info': text('EXCLUDED.guest_info'),
-                            'subscriber_count': text('EXCLUDED.subscriber_count'),
-                            'published_at': text('EXCLUDED.published_at'),
-                            'topic': text('EXCLUDED.topic')
-                        }
-                    )
+                # Upsert videos
+                stmt = insert(videos).values(video_data)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['video_id'],
+                    set_={
+                        'title': stmt.excluded.title,
+                        'description': stmt.excluded.description,
+                        'url': stmt.excluded.url,
+                        'views': stmt.excluded.views,
+                        'average_views': stmt.excluded.average_views,
+                        'overperformance_percentage': stmt.excluded.overperformance_percentage,
+                        'thumbnail_url': stmt.excluded.thumbnail_url,
+                        'guest_info': stmt.excluded.guest_info,
+                        'published_at': stmt.excluded.published_at,
+                        'subscriber_count': stmt.excluded.subscriber_count,
+                        'topic': stmt.excluded.topic,
+                        'channel_id': stmt.excluded.channel_id,
+                        'created_at': stmt.excluded.created_at
+                    }
                 )
-                conn.commit()  # Explicitly commit the transaction
+                result = conn.execute(stmt)
+                logger.info(f"Upserted {result.rowcount} videos")
+
+            logger.info("Database transaction committed successfully")
         except Exception as e:
-            logging.error(f"Error updating database in bulk: {str(e)}")
-            conn.rollback()  # Explicitly rollback on error
+            logger.error(f"Error upserting data into database: {str(e)}")
+            raise
 
 if __name__ == '__main__':
     logging.info("Starting the application")

@@ -65,10 +65,12 @@
     </header>
     <main class="center-wrapper">
         <div class="search-container">
-            <form id="search-form">
+            <form method="POST" id="search-form">
                 <div class="search-bar">
                     <input type="text" id="topic" name="topic" placeholder="Enter a topic" class="topic-input" value="{{ request.form.get('topic', '') }}">
-                    <button type="submit">Search</button>
+                    <button type="submit">
+                        <i class="fas fa-search"></i>
+                    </button>
                 </div>
             </form>
         </div>
@@ -160,51 +162,29 @@
             {% endif %}
         </div>
     </main>
-    <div id="results"></div>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script>
-    $(document).ready(function() {
-        $('#search-form').on('submit', function(e) {
-            e.preventDefault();
-            $.ajax({
-                url: '/',
+        function updateGuestSuitability(guestName, suitability, index) {
+            console.log(`Updating guest: ${guestName}, suitability: ${suitability}, index: ${index}`);
+            fetch('{{ url_for("update_guest_suitability") }}', {
                 method: 'POST',
-                data: $(this).serialize(),
-                success: function(data) {
-                    checkTaskStatus(data.task_id);
-                }
-            });
-        });
-
-        function checkTaskStatus(taskId) {
-            $.ajax({
-                url: '/task_status/' + taskId,
-                method: 'GET',
-                success: function(data) {
-                    if (data.state === 'PENDING') {
-                        $('#results').html('<p>Processing...</p>');
-                        setTimeout(function() {
-                            checkTaskStatus(taskId);
-                        }, 2000);
-                    } else if (data.state === 'SUCCESS') {
-                        displayResults(data.result);
-                    } else {
-                        $('#results').html('<p>Error: ' + data.status + '</p>');
-                    }
-                }
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `guest_name=${encodeURIComponent(guestName)}&suitability=${suitability}`
+            })
+            .then(response => {
+                console.log('Response status:', response.status);
+                return response.text();
+            })
+            .then(data => {
+                console.log('Response data:', data);
+                document.getElementById(`button-container-${index}`).innerHTML = '<span class="update-success">Data updated</span>';
+            })
+            .catch((error) => {
+                console.error('Error:', error);
+                alert('An error occurred while updating the data.');
             });
         }
-
-        function displayResults(result) {
-            // Update this function to display the results as needed
-            var html = '<h2>Results</h2>';
-            html += '<p>Total Views: ' + result.total_views + '</p>';
-            html += '<p>Popularity Score: ' + result.popularity_score + '</p>';
-            // ... add more result display logic ...
-            $('#results').html(html);
-        }
-    });
     </script>
 </body>
 </html>
-
