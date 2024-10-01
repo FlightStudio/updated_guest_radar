@@ -64,8 +64,14 @@
         </div>
     </header>
     <main class="center-wrapper">
+        <!-- Add this div for the loading spinner and message -->
+        <div id="loading">
+            <div class="spinner"></div>
+            <div class="loading-message"> Fetching results... this may take a minute</div> <!-- New message -->
+        </div>
+        
         <div class="search-container">
-            <form method="POST" id="search-form">
+            <form method="POST" id="search-form" onsubmit="toggleLoading(true)">
                 <div class="search-bar">
                     <input type="text" id="topic" name="topic" placeholder="Enter a topic" class="topic-input" value="{{ request.form.get('topic', '') }}">
                     <button type="submit">
@@ -162,6 +168,7 @@
             {% endif %}
         </div>
     </main>
+    
     <script>
         function updateGuestSuitability(guestName, suitability, index) {
             console.log(`Updating guest: ${guestName}, suitability: ${suitability}, index: ${index}`);
@@ -185,6 +192,13 @@
                 alert('An error occurred while updating the data.');
             });
         }
+        
+        // Add this new function to show/hide the loading spinner
+        function toggleLoading(show) {
+            console.log('toggleLoading called with:', show);
+            document.getElementById('loading').style.display = show ? 'flex' : 'none';
+        }
+
     </script>
 </body>
 </html>
